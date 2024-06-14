@@ -1,38 +1,42 @@
-from flask_restx import Resource, reqparse, abort
-from flask import jsonify
+from flask_restx import Resource
+from flask import request, jsonify
 from models.user import UserModel
-from flask_jwt_extended import jwt_required, create_access_token
+from models.cart import CartModel
+from serialisers.user import user_schema
+from flask_jwt_extended import create_access_token
 from db import db
+from datetime import datetime, timedelta
 
 class UserRegister(Resource):
     def post(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument("username", type=str)
-        parser.add_argument("password", type=str)
-        parser.add_argument("role_id",type=int)
-        args = parser.parse_args()
-        username = args['username']
-        password = args['password']
-        role_id = args['role_id']
-        user = UserModel.query.filter_by(user_name = username).one_or_none()
-        if user and user.user_name  == username:
-            return "User Already exists"
-        else:   
-            user = UserModel(username, password, role_id)
-            db.session.add(user)
+        rx_user: UserModel = user_schema.load(request.get_json())
+        user: UserModel = UserModel.query.filter_by(
+            username=rx_user.username
+        ).one_or_none()
+        print(user)
+        if user and user.username == rx_user.username:
+            return {"Message": "User Already exists"}
+        else:
+            db.session.add(rx_user)
             db.session.commit()
-        
+            user_id = UserModel.query.filter_by(user_id = rx_user.user_id).one_or_none().user_id
+            cart = CartModel(user_id)
+            db.session.add(cart)
+            db.session.commit()
+            return user_schema.dump(rx_user)
+
 
 class UserLogin(Resource):
     def post(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument("username", type=str)
-        parser.add_argument("password", type=str)
-        args = parser.parse_args()
-        username = args['username']
-        password = args['password']
-        user = UserModel.query.filter_by(user_name = username).one_or_none()
-        if user:
-            return create_access_token(identity=user.user_id, additional_claims={"role":user.role_id})
+        data: UserModel = user_schema.load(request.get_json())
+        user: UserModel = UserModel.query.filter_by(
+            username=data.username
+        ).one_or_none()
+        if user and data.password == user.password:
+            return {
+                "access_toekn": create_access_token(
+                    identity=user.user_id, expires_delta= timedelta(300),additional_claims={"role_id": user.role_id}
+                )
+            }
         else:
             return {"Message": "User is not registered."}
